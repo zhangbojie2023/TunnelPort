@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PassPort</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <script defer src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+    <script type="module" src="/src/main.js" defer></script>
+  </head>
+
+  <body>
+
+    <!-- ═══════ HOME PAGE ═══════ -->
+    <div class="page active" id="page-home">
+      <div class="app">
+
+        <!-- Drag region for overlay titlebar -->
+        <div class="home-drag-bar" data-tauri-drag-region></div>
+
+        <!-- Status Ring — clickable toggle -->
+        <div class="status-orbit">
+          <div class="status-ring" id="statusRing" onclick="window.toggleConnection()">
+            <svg class="ring-svg" viewBox="0 0 150 150">
+              <circle cx="75" cy="75" r="72" fill="none" class="ring-arc" />
+              <circle cx="75" cy="75" r="72" fill="none" class="ring-glow" />
+            </svg>
+            <div class="status-core">
+              <span class="status-label" id="statusText">连接</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Profile Selector -->
+        <div class="profile-selector" id="profileSelector">
+          <div class="profile-selector-trigger" id="profileTrigger" onclick="window.toggleProfileDropdown()">
+            <span class="profile-selector-name" id="profileName">Default</span>
+            <i data-lucide="chevron-down" class="profile-selector-arrow-icon"></i>
+          </div>
+          <div class="profile-dropdown" id="profileDropdown">
+            <div class="profile-dropdown-list" id="profileList"></div>
+            <div class="profile-dropdown-divider"></div>
+            <button class="profile-dropdown-new" onclick="window.newProfile()">+ New Profile</button>
+          </div>
+        </div>
+
+        <!-- Tunnel Data -->
+        <div class="tunnel-data">
+          <div class="section-header">
+            <div class="section-label" id="tunnelProfileName">Tunnel</div>
+            <button class="logs-link" onclick="window.navigate('logs')">Logs</button>
+          </div>
+
+          <!-- Primary: target + ssh + host status -->
+          <div class="tunnel-target-row">
+            <span class="tunnel-target-text" id="targetInfo">—</span>
+            <span class="data-latency" id="hostLatency"></span>
+            <span class="data-dot" id="hostDot"></span>
+          </div>
+
+          <!-- Secondary: local proxy ports -->
+          <div class="tunnel-ports">
+            <div class="tunnel-port-row">
+              <span class="tunnel-port-key">SOCKS</span>
+              <span class="tunnel-port-val">:<span id="socksPortDisplay">1080</span></span>
+              <span class="data-dot" id="socksDot"></span>
+            </div>
+            <div class="tunnel-port-row">
+              <span class="tunnel-port-key">HTTP</span>
+              <span class="tunnel-port-val">:<span id="httpPortDisplay">1081</span></span>
+              <span class="data-dot" id="httpDot"></span>
+            </div>
+          </div>
+
+          <!-- Stats: LAN IP, speed, total traffic -->
+          <div class="tunnel-divider"></div>
+          <div class="tunnel-stats">
+            <div class="tunnel-port-row">
+              <span class="tunnel-port-key">LAN</span>
+              <span class="tunnel-port-val" id="statsIp">—</span>
+            </div>
+            <div class="tunnel-port-row">
+              <span class="tunnel-port-key">↑</span>
+              <span class="tunnel-port-val" id="statsUpSpeed">—</span>
+            </div>
+            <div class="tunnel-port-row">
+              <span class="tunnel-port-key">↓</span>
+              <span class="tunnel-port-val" id="statsDownSpeed">—</span>
+            </div>
+            <div class="tunnel-port-row">
+              <span class="tunnel-port-key">Total</span>
+              <span class="tunnel-port-val">
+                ↑<span id="statsTotalUp">0 B</span> ↓<span id="statsTotalDown">0 B</span>
+              </span>
+            </div>
+          </div>
+
+          <!-- Footer: Uptime / Error -->
+          <div class="tunnel-divider"></div>
+          <div class="tunnel-footer-row">
+            <span class="tunnel-uptime" id="tunnelUptime"></span>
+            <span class="tunnel-error" id="tunnelError"></span>
+          </div>
+        </div>
+
+        <!-- Test Progress (shown during connection) -->
+        <div class="test-progress" id="testProgress" style="display: none;">
+          <div class="test-progress-item" id="testSocks">
+            <span class="test-dot"></span> SOCKS
+          </div>
+          <div class="test-progress-item" id="testHttp">
+            <span class="test-dot"></span> HTTP
+          </div>
+          <div class="test-progress-item" id="testTarget">
+            <span class="test-dot"></span> Target
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ═══════ SETTINGS PAGE ═══════ -->
+    <div class="page" id="page-settings">
+      <header class="page-header" data-tauri-drag-region>
+        <button class="back-btn" onclick="window.navigate('home')"><i data-lucide="arrow-left"></i></button>
+        <span class="page-title" id="settingsTitle">Edit Profile</span>
+      </header>
+      <div class="page-body">
+
+        <!-- Tab Bar -->
+        <div class="config-tabs">
+          <button class="config-tab active" data-tab="server" onclick="window.switchTab('server')">Server</button>
+          <button class="config-tab" data-tab="proxy" onclick="window.switchTab('proxy')">Proxy</button>
+          <button class="config-tab" data-tab="options" onclick="window.switchTab('options')">Options</button>
+        </div>
+
+        <!-- Server Tab -->
+        <div class="config-tab-panel active" id="tab-server">
+          <div class="setting-row">
+            <label for="profileNameInput">Profile Name</label>
+            <input type="text" id="profileNameInput" />
+          </div>
+          <div class="setting-row">
+            <label for="targetHost">Target Host</label>
+            <input type="text" id="targetHost" />
+          </div>
+          <div class="setting-row">
+            <label for="targetUser">Username</label>
+            <input type="text" id="targetUser" />
+          </div>
+          <div class="setting-row">
+            <label for="password">Password</label>
+            <input type="password" id="password" placeholder="optional" />
+          </div>
+          <div class="setting-row">
+            <label for="sshPort">SSH Port</label>
+            <input type="text" id="sshPort" />
+          </div>
+        </div>
+
+        <!-- Proxy Tab -->
+        <div class="config-tab-panel" id="tab-proxy">
+          <div class="setting-row">
+            <label for="socksPort">SOCKS Port</label>
+            <input type="text" id="socksPort" />
+          </div>
+          <div class="setting-row">
+            <label for="httpPort">HTTP Port</label>
+            <input type="text" id="httpPort" />
+          </div>
+          <div class="setting-row">
+            <label for="autoProxy">Auto Proxy</label>
+            <input type="checkbox" class="toggle" id="autoProxy" checked />
+          </div>
+        </div>
+
+        <!-- Options Tab -->
+        <div class="config-tab-panel" id="tab-options">
+          <div class="setting-row">
+            <label for="autoReconnect">Auto Reconnect</label>
+            <input type="checkbox" class="toggle" id="autoReconnect" checked />
+          </div>
+          <div class="setting-row">
+            <label for="testUrl">Test URL</label>
+            <input type="text" id="testUrl" placeholder="https://www.google.com" />
+          </div>
+          <div class="setting-row">
+            <label for="autoStart">Start at Login</label>
+            <input type="checkbox" class="toggle" id="autoStart" />
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="settings-actions">
+          <button class="btn-save" onclick="window.saveSettings()">Save</button>
+          <button class="btn-delete" onclick="window.deleteProfile()">Delete</button>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ═══════ LOGS PAGE ═══════ -->
+    <div class="page" id="page-logs">
+      <header class="page-header" data-tauri-drag-region>
+        <button class="back-btn" onclick="window.navigate('home')"><i data-lucide="arrow-left"></i></button>
+        <span class="page-title">Logs</span>
+      </header>
+      <div class="page-body">
+        <div class="log-entries" id="logEntries"></div>
+        <button class="btn-clear-logs" onclick="window.clearLogs()">Clear</button>
+      </div>
+    </div>
+
+    <!-- Toast (shared across all pages) -->
+    <div class="toast" id="toast"></div>
+
+  </body>
+</html>

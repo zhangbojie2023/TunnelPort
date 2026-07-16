@@ -1,0 +1,41 @@
+[package]
+name = "passport"
+version = "0.1.0"
+description = "SSH tunnel manager for macOS"
+authors = ["zhangbojie"]
+edition = "2021"
+
+[lib]
+name = "passport_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "macos-private-api", "devtools"] }
+tauri-plugin-shell = "2"
+tauri-plugin-store = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+which = "6"
+dirs = "5"
+hyper = { version = "1", features = ["server", "http1", "client"] }
+hyper-util = { version = "0.1", features = ["server", "server-auto", "tokio", "client-legacy", "http1"] }
+http-body-util = "0.1"
+fast-socks5 = "0.10"
+http = "1"
+uuid = { version = "1", features = ["v4"] }
+local-ip-address = "0.5"
+
+[profile.release]
+strip = true
+opt-level = "z"
+lto = true
+codegen-units = 1
