@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "PassPort",
+  "productName": "TunnelPort",
   "version": "0.1.0",
-  "identifier": "com.zhangbojie.passport",
+  "identifier": "com.zhangbojie.tunnelport",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
@@ -14,7 +14,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "PassPort",
+        "title": "TunnelPort",
         "width": 420,
         "height": 520,
         "resizable": false,

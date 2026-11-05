@@ -51,7 +51,7 @@ impl<S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>> Layer
             "{} {} {}: {}",
             chrono_now(),
             level,
-            target.strip_prefix("passport_lib").unwrap_or(target),
+            target.strip_prefix("tunnelport_lib").unwrap_or(target),
             message
         );
 

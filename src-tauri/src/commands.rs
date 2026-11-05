@@ -521,7 +521,7 @@ pub async fn confirm_dialog(app: tauri::AppHandle, message: String) -> Result<bo
     let result = app
         .dialog()
         .message(&message)
-        .title("PassPort")
+        .title("TunnelPort")
         .kind(MessageDialogKind::Warning)
         .buttons(MessageDialogButtons::OkCancelCustom(
             "Delete".into(),
@@ -538,7 +538,7 @@ pub async fn get_recent_logs(lines: Option<usize>) -> Result<Vec<String>, String
     let lines = lines.unwrap_or(200);
     let log_dir = dirs::data_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("passport")
+        .join("tunnelport")
         .join("logs");
 
     // Find today's log file
@@ -550,7 +550,7 @@ pub async fn get_recent_logs(lines: Option<usize>) -> Result<Vec<String>, String
         let days = now.as_secs() / 86400;
         // Calculate date from unix days (simplified)
         let date = chrono_date(days);
-        format!("passport.log.{}", date)
+        format!("tunnelport.log.{}", date)
     };
 
     let log_path = log_dir.join(&today);
@@ -559,7 +559,7 @@ pub async fn get_recent_logs(lines: Option<usize>) -> Result<Vec<String>, String
         if let Ok(entries) = std::fs::read_dir(&log_dir) {
             let mut log_files: Vec<_> = entries
                 .filter_map(|e| e.ok())
-                .filter(|e| e.file_name().to_string_lossy().starts_with("passport.log."))
+                .filter(|e| e.file_name().to_string_lossy().starts_with("tunnelport.log."))
                 .collect();
             log_files.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
             if let Some(latest) = log_files.first() {

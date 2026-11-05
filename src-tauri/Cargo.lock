@@ -2280,33 +2280,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "passport"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "dirs 5.0.1",
- "fast-socks5",
- "http",
- "http-body-util",
- "hyper",
- "hyper-util",
- "local-ip-address",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-shell",
- "tauri-plugin-store",
- "tokio",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
- "uuid",
- "which",
-]
-
-[[package]]
 name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4014,6 +3987,33 @@ name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
+
+[[package]]
+name = "tunnelport"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dirs 5.0.1",
+ "fast-socks5",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "local-ip-address",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-shell",
+ "tauri-plugin-store",
+ "tokio",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "uuid",
+ "which",
+]
 
 [[package]]
 name = "typeid"

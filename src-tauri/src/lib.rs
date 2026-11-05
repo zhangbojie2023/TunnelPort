@@ -54,17 +54,17 @@ pub fn run() {
     // Set up logging: stderr + daily rotating file + Tauri event forwarding
     let log_dir = dirs::data_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("passport")
+        .join("tunnelport")
         .join("logs");
     std::fs::create_dir_all(&log_dir).ok();
 
-    let file_appender = tracing_appender::rolling::daily(&log_dir, "passport.log");
+    let file_appender = tracing_appender::rolling::daily(&log_dir, "tunnelport.log");
     let (event_log_layer, event_log_handle) = log_layer::EventLogLayer::new();
 
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("passport=debug".parse().unwrap()),
+                .add_directive("tunnelport=debug".parse().unwrap()),
         )
         .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
         .with(tracing_subscriber::fmt::layer().with_writer(file_appender))
@@ -124,7 +124,7 @@ pub fn run() {
             tracing::debug!("Setup: building tray icon");
             let _tray = TrayIconBuilder::new()
                 .icon(icon)
-                .tooltip("PassPort")
+                .tooltip("TunnelPort")
                 .menu(&menu)
                 .show_menu_on_left_click(true)
                 .on_menu_event(move |app, event| {

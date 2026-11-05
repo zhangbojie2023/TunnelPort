@@ -2,7 +2,7 @@ use anyhow::{Result, anyhow};
 use std::fs;
 use std::path::PathBuf;
 
-const PLIST_ID: &str = "com.zhangbojie.passport";
+const PLIST_ID: &str = "com.zhangbojie.tunnelport";
 
 pub fn plist_path() -> PathBuf {
     let home = dirs::home_dir().expect("Could not find home directory");

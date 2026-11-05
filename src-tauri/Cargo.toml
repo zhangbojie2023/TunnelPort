@@ -1,12 +1,12 @@
 [package]
-name = "passport"
+name = "tunnelport"
 version = "0.1.0"
 description = "SSH tunnel manager for macOS"
 authors = ["zhangbojie"]
 edition = "2021"
 
 [lib]
-name = "passport_lib"
+name = "tunnelport_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
