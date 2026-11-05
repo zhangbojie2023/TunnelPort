@@ -12,6 +12,14 @@ dist
 dist-ssr
 *.local
 
+# Build artifacts (Rust)
+src-tauri/target
+src-tauri/gen
+
+# Internal tooling / local notes
+.workbuddy/
+docs/design-system.md
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

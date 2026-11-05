@@ -20,9 +20,10 @@
         "resizable": false,
         "center": true,
         "titleBarStyle": "Overlay",
+        "trafficLightPosition": { "x": 14, "y": 13 },
         "hiddenTitle": true,
         "transparent": true,
-        "backgroundColor": "#0a0e14"
+        "backgroundColor": "#f4f2ee"
       }
     ],
     "security": {
@@ -31,7 +32,10 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["dmg", "app"],
+    "targets": [
+      "dmg",
+      "app"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

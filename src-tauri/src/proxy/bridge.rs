@@ -16,6 +16,15 @@ pub struct ProxyBridge {
     pub task: tokio::task::JoinHandle<()>,
 }
 
+/// A dropped JoinHandle only detaches its task. If a connect is cancelled
+/// while the bridge is being built, that would leave the HTTP listener holding
+/// the port forever — so the task must be aborted whenever the bridge dies.
+impl Drop for ProxyBridge {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
 impl ProxyBridge {
     pub async fn start(socks_port: u16, http_port: u16, stats: Arc<ProxyStats>) -> Result<Self> {
         let listener = TcpListener::bind(format!("127.0.0.1:{}", http_port))
@@ -48,10 +57,14 @@ impl ProxyBridge {
             }
         });
 
+        // Own the bridge *before* awaiting: if this future is dropped by a
+        // cancelled connect, Drop aborts the spawned listener task.
+        let bridge = ProxyBridge { task };
+
         // Wait for port to be ready
         crate::network::port::wait_for_port(http_port, std::time::Duration::from_secs(5)).await;
 
-        Ok(ProxyBridge { task })
+        Ok(bridge)
     }
 
     pub async fn abort(&mut self) {

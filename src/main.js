@@ -1,13 +1,6 @@
 const { invoke } = window.__TAURI__?.core ?? {};
 const { listen } = window.__TAURI__?.event ?? {};
 
-// ── Diagnostic logging ──
-console.log("[PassPort] main.js loaded");
-console.log("[PassPort] __TAURI__ available:", !!window.__TAURI__);
-console.log("[PassPort] invoke available:", typeof invoke);
-console.log("[PassPort] listen available:", typeof listen);
-console.log("[PassPort] location.href:", location.href);
-
 // ── State Machine ──
 const STATES = {
   DISCONNECTED: 'disconnected',
@@ -16,9 +9,39 @@ const STATES = {
   ERROR: 'error',
 };
 
+// Plain-language state lines. Row 1 states the condition, row 2 says what it
+// means for the user — no metaphor, no "route is live" flourish.
+const LABELS = {
+  [STATES.DISCONNECTED]: 'Disconnected',
+  [STATES.CONNECTING]: 'Connecting…',
+  [STATES.CONNECTED]: 'Connected',
+  [STATES.ERROR]: 'Connection failed',
+};
+
+const CAPTIONS = {
+  [STATES.DISCONNECTED]: 'Tunnel closed',
+  [STATES.CONNECTING]: 'Opening tunnel to the target host',
+  [STATES.CONNECTED]: 'Traffic is routed through the tunnel',
+  [STATES.ERROR]: 'Tunnel halted',
+};
+
+const ACTIONS = {
+  [STATES.DISCONNECTED]: 'Connect',
+  [STATES.CONNECTING]: 'Cancel',
+  [STATES.CONNECTED]: 'Disconnect',
+  [STATES.ERROR]: 'Retry',
+};
+
 let currentState = STATES.DISCONNECTED;
 let errorMessage = null;
 let reachability = null;
+
+// Each connect attempt gets a number. A cancel remembers which attempt it
+// belongs to, so a late `tunnel_start` reply can't overwrite the UI after the
+// user already asked to stop.
+let connectSeq = 0;
+let cancellingSeq = null;
+const isCancelling = () => cancellingSeq !== null;
 
 // Profile data
 let allProfiles = [];
@@ -29,25 +52,20 @@ let isNewProfilePending = false;
 function render() {
   const ring = document.getElementById('statusRing');
   const label = document.getElementById('statusText');
+  const caption = document.getElementById('statusCaption');
+  const action = ring.querySelector('.status-action');
 
   ring.className = 'status-ring';
+  if (currentState === STATES.CONNECTING) ring.classList.add('connecting');
+  else if (currentState === STATES.CONNECTED) ring.classList.add('connected');
+  else if (currentState === STATES.ERROR) ring.classList.add('error');
 
-  switch (currentState) {
-    case STATES.CONNECTING:
-      ring.classList.add('connecting');
-      label.textContent = '连接中…';
-      break;
-    case STATES.CONNECTED:
-      ring.classList.add('connected');
-      label.textContent = '断开连接';
-      break;
-    case STATES.ERROR:
-      ring.classList.add('error');
-      label.textContent = '错误';
-      break;
-    default:
-      label.textContent = '连接';
+  label.textContent = LABELS[currentState] || LABELS[STATES.DISCONNECTED];
+  if (caption) caption.textContent = CAPTIONS[currentState] || '';
+  if (action) {
+    action.textContent = isCancelling() ? 'Cancelling…' : (ACTIONS[currentState] || '');
   }
+  ring.disabled = isCancelling();
 
   // Dots & latency
   if (reachability) {
@@ -64,6 +82,7 @@ function render() {
   // Error message
   setError(currentState === STATES.ERROR ? errorMessage : null);
 }
+
 
 // ── State transition ──
 function setState(state) {
@@ -83,23 +102,49 @@ function setState(state) {
     errorMessage = null;
   }
 
+  // The self-test readout only belongs to an in-flight connect.
+  if (state !== STATES.CONNECTING) hideTestProgress();
+
   render();
 }
 
 // ── Tunnel Connection ──
 
 async function connect() {
+  // A cancel is still unwinding on the backend; don't stack a second connect.
+  if (isCancelling()) return;
+  const seq = ++connectSeq;
+  cancellingSeq = null;
   setState(STATES.CONNECTING);
   showTestProgress();
   try {
     await invoke('tunnel_start');
-    setState(STATES.CONNECTED);
     hideTestProgress();
+
+    // Cancel landed after the backend had already finished connecting: don't
+    // resurrect the UI, tear the freshly built tunnel back down instead.
+    if (cancellingSeq === seq) {
+      await disconnect();
+      return;
+    }
+    // A newer attempt superseded this one — leave its state alone.
+    if (seq !== connectSeq) return;
+
+    setState(STATES.CONNECTED);
     refreshStatus();
   } catch (e) {
+    hideTestProgress();
+    if (cancellingSeq === seq) {
+      setState(STATES.DISCONNECTED);
+      return;
+    }
     errorMessage = String(e);
     setState(STATES.ERROR);
-    hideTestProgress();
+  } finally {
+    if (cancellingSeq === seq) {
+      cancellingSeq = null;
+      render();
+    }
   }
 }
 
@@ -112,9 +157,26 @@ async function disconnect() {
   }
 }
 
+async function cancelConnect() {
+  if (currentState !== STATES.CONNECTING || isCancelling()) return;
+  cancellingSeq = connectSeq;
+  hideTestProgress();
+  render();
+  try {
+    await invoke('tunnel_cancel');
+  } catch (e) {
+    // Nothing is unwinding on the backend — unlock the button so the user can
+    // retry instead of being stuck forever on "Cancelling…".
+    cancellingSeq = null;
+    render();
+    showToast('Cancel failed: ' + e);
+  }
+}
+
 function toggleConnection() {
-  if (currentState === STATES.CONNECTING) return;
-  if (currentState === STATES.CONNECTED) disconnect();
+  if (isCancelling()) return;
+  if (currentState === STATES.CONNECTING) cancelConnect();
+  else if (currentState === STATES.CONNECTED) disconnect();
   else connect();
 }
 
@@ -188,6 +250,13 @@ function setupEventListeners() {
     setState(STATES.ERROR);
   });
 
+  // Backend finished unwinding a cancelled connect. Reset the UI immediately,
+  // even if the tunnel_start promise hasn't settled yet.
+  listen('tunnel-cancelled', () => {
+    setState(STATES.DISCONNECTED);
+    hideTestProgress();
+  });
+
   listen('tunnel-test-progress', (event) => {
     const { step, status } = event.payload;
     updateTestProgress(step, status);
@@ -198,7 +267,8 @@ function setupEventListeners() {
   });
 
   listen('tray-disconnect', () => {
-    disconnect();
+    if (currentState === STATES.CONNECTING) cancelConnect();
+    else disconnect();
   });
 
   // Real-time log forwarding from backend
@@ -251,6 +321,9 @@ async function loadProfiles() {
   }
 }
 
+const ICON_PENCIL = '<svg viewBox="0 0 24 24"><use href="#i-pencil"/></svg>';
+const ICON_TRASH  = '<svg viewBox="0 0 24 24"><use href="#i-trash"/></svg>';
+
 function populateProfileSelector() {
   const nameEl = document.getElementById('profileName');
   const listEl = document.getElementById('profileList');
@@ -270,7 +343,8 @@ function populateProfileSelector() {
 
     const editBtn = document.createElement('span');
     editBtn.className = 'profile-item-edit';
-    editBtn.innerHTML = '<i data-lucide="pencil"></i>';
+    editBtn.title = 'Edit profile';
+    editBtn.innerHTML = ICON_PENCIL;
     editBtn.onclick = (e) => {
       e.stopPropagation();
       editProfile(p.id);
@@ -278,7 +352,8 @@ function populateProfileSelector() {
 
     const deleteBtn = document.createElement('span');
     deleteBtn.className = 'profile-item-delete';
-    deleteBtn.innerHTML = '<i data-lucide="trash-2"></i>';
+    deleteBtn.title = 'Delete profile';
+    deleteBtn.innerHTML = ICON_TRASH;
     deleteBtn.onclick = (e) => {
       e.stopPropagation();
       deleteProfileById(p.id);
@@ -289,8 +364,6 @@ function populateProfileSelector() {
     item.appendChild(deleteBtn);
     listEl.appendChild(item);
   }
-
-  if (window.lucide) window.lucide.createIcons();
 }
 
 async function switchProfile(profileId) {
@@ -314,25 +387,28 @@ async function switchProfile(profileId) {
   }
 }
 
-async function editProfile(profileId) {
-  try {
-    isNewProfilePending = false;
-    await invoke('set_active_profile', { profileId });
-    activeProfileId = profileId;
-    const profile = allProfiles.find((p) => p.id === profileId);
-    if (profile) {
-      fillSettingsFromProfile(profile);
-      updateTunnelDisplay(profile);
-    }
-    populateProfileSelector();
-    closeProfileDropdown();
-    document.getElementById('settingsTitle').textContent = 'Edit Profile';
-    updateSettingsButtons();
-    switchTab('server');
-    navigate('settings');
-  } catch (e) {
-    showToast('Edit failed: ' + e);
+function editProfile(profileId) {
+  isNewProfilePending = false;
+  activeProfileId = profileId;
+  const profile = allProfiles.find((p) => p.id === profileId);
+
+  // Update UI immediately (no await — don't block on disk I/O)
+  if (profile) {
+    fillSettingsFromProfile(profile);
+    updateTunnelDisplay(profile);
   }
+  populateProfileSelector();
+  closeProfileDropdown();
+  document.getElementById('settingsTitle').textContent = 'Edit Profile';
+  updateSettingsButtons();
+  switchTab('server');
+  navigate('settings');
+
+  // Persist active profile in background
+  invoke('set_active_profile', { profileId }).catch((e) => {
+    console.error('Failed to persist active profile:', e);
+    showToast('Failed to save preference');
+  });
 }
 
 async function saveSettings() {
@@ -350,7 +426,7 @@ async function saveSettings() {
     populateProfileSelector();
     const updated = allProfiles.find((p) => p.id === activeProfileId);
     if (updated) updateTunnelDisplay(updated);
-    showToast('Settings saved');
+    showToast('Profile saved');
     navigate('home');
   } catch (e) {
     showToast('Save failed: ' + e);
@@ -474,7 +550,9 @@ function updateTunnelDisplay(profile) {
 }
 
 function updateSettingsButtons() {
-  const delBtn = document.querySelector('.btn-delete');
+  // Class was renamed in the redesign; query the real selector so a fresh
+  // profile never offers Delete before it exists on disk.
+  const delBtn = document.querySelector('#page-settings .btn-danger');
   if (delBtn) {
     delBtn.style.display = isNewProfilePending ? 'none' : '';
   }
@@ -484,12 +562,22 @@ function updateSettingsButtons() {
 
 function toggleProfileDropdown() {
   const dd = document.getElementById('profileDropdown');
-  dd.classList.toggle('open');
+  const arrow = document.querySelector('.profile-selector-arrow-icon');
+  const open = dd.classList.toggle('open');
+  if (arrow) arrow.classList.toggle('is-open', open);
 }
 
 function closeProfileDropdown() {
   const dd = document.getElementById('profileDropdown');
+  const arrow = document.querySelector('.profile-selector-arrow-icon');
   dd.classList.remove('open');
+  if (arrow) arrow.classList.remove('is-open');
+}
+
+// Gear affordance on the home chrome — opens the active profile.
+function openSettings() {
+  if (!activeProfileId) return;
+  editProfile(activeProfileId);
 }
 
 document.addEventListener('click', (e) => {
@@ -729,15 +817,8 @@ function clearLogs() {
 // ── Init ──
 
 window.addEventListener('DOMContentLoaded', () => {
-  const appEl = document.querySelector('.app');
-  console.log('[PassPort] DOMContentLoaded — .app children:', appEl?.children.length);
-  console.log('[PassPort] body computed bg:', getComputedStyle(document.body).backgroundColor);
-  console.log('[PassPort] html computed bg:', getComputedStyle(document.documentElement).backgroundColor);
-
   loadProfiles();
   setupEventListeners();
-
-  if (window.lucide) window.lucide.createIcons();
 });
 
 // Expose functions for onclick handlers
@@ -753,5 +834,6 @@ window.editProfile = editProfile;
 window.deleteProfile = deleteProfile;
 window.switchTab = switchTab;
 window.toggleProfileDropdown = toggleProfileDropdown;
+window.openSettings = openSettings;
 window.loadLogs = loadLogs;
 window.clearLogs = clearLogs;

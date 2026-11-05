@@ -29,6 +29,7 @@ pub async fn start_proxy(config: &TunnelProfile, stats: Arc<ProxyStats>) -> Resu
         ]);
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
+        cmd.kill_on_drop(true);  // Don't orphan gost if the connect is cancelled
 
         let child = cmd.spawn()
             .map_err(|e| anyhow::anyhow!("Failed to start gost: {}", e))?;

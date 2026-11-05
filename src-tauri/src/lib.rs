@@ -181,6 +181,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::tunnel_start,
             commands::tunnel_stop,
+            commands::tunnel_cancel,
             commands::tunnel_status,
             commands::proxy_toggle,
             commands::set_autostart,

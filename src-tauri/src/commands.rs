@@ -5,7 +5,9 @@ use crate::config::{TunnelProfile, AppConfig};
 use crate::network::reachability::HealthReport;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::sync::watch;
 use tokio::time::timeout;
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -66,8 +68,59 @@ async fn cleanup_tunnel(state: &AppState) {
     }
 }
 
+/// Race a future against the cancel signal. `None` means the user cancelled.
+///
+/// `biased` makes cancellation win when both branches are ready on the same
+/// poll, so a connect that finishes exactly as Cancel is clicked still ends
+/// up stopped rather than flipping the UI back to Connected.
+async fn cancellable<F: Future>(fut: F, rx: &mut watch::Receiver<u64>) -> Option<F::Output> {
+    tokio::select! {
+        biased;
+        _ = rx.changed() => None,
+        result = fut => Some(result),
+    }
+}
+
+/// Has a cancel arrived since this receiver last saw a value?
+fn cancel_requested(rx: &watch::Receiver<u64>) -> bool {
+    rx.has_changed().unwrap_or(false)
+}
+
+/// Unwind a cancelled connect in one place: kill whatever was started, drop
+/// the system proxy, reset shared state and tell the UI we're stopped.
+async fn finish_cancelled(app: &tauri::AppHandle, state: &AppState) -> Result<(), String> {
+    tracing::info!("Connect cancelled — unwinding tunnel");
+    cleanup_tunnel(state).await;
+    if let Err(e) = platform::unset_system_proxy().await {
+        tracing::warn!("Failed to unset system proxy during cancel: {}", e);
+    }
+    *state.status.write().await = TunnelStatus::Stopped;
+    *state.connected_at.write().await = None;
+    let _ = app.emit("tunnel-status", "stopped").ok();
+    let _ = app.emit("tunnel-cancelled", ()).ok();
+    Err("Connection cancelled".to_string())
+}
+
+/// Run one cancellable stage; on cancel, unwind and return from the caller.
+macro_rules! cancellable_stage {
+    ($fut:expr, $rx:expr, $app:expr, $state:expr) => {
+        match cancellable($fut, $rx).await {
+            Some(result) => result,
+            None => return finish_cancelled($app, $state).await,
+        }
+    };
+}
+
 #[tauri::command]
 pub async fn tunnel_start(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    // Subscribe before the first await so a cancel fired during cleanup or a
+    // lock wait is still observed by the first cancellable stage.
+    let (mut cancel_rx, cancelled_before_start) = state.cancel.subscribe();
+    if cancelled_before_start {
+        tracing::info!("Cancel arrived before connect started — aborting immediately");
+        return finish_cancelled(&app, &state).await;
+    }
+
     let app_config = state.app_config.read().await.clone();
     let profile = active_profile(&app_config)?;
     tracing::info!("Starting tunnel — profile: {:?}, host: {}:{}, user: {}",
@@ -75,6 +128,9 @@ pub async fn tunnel_start(app: tauri::AppHandle, state: State<'_, AppState>) -> 
 
     // Stop any existing tunnel before starting a new one
     cleanup_tunnel(&state).await;
+    if cancel_requested(&cancel_rx) {
+        return finish_cancelled(&app, &state).await;
+    }
 
     *state.status.write().await = TunnelStatus::Connecting;
     let _ = app.emit("tunnel-status", "connecting").ok();
@@ -82,71 +138,107 @@ pub async fn tunnel_start(app: tauri::AppHandle, state: State<'_, AppState>) -> 
     // Reset traffic stats for fresh connection
     state.stats.reset();
 
-    match crate::tunnel::manager::ManagedTunnel::start(&profile, Arc::clone(&state.stats)).await {
-        Ok(tunnel) => {
-            *state.tunnel.lock().await = Some(tunnel);
-            tracing::info!("Tunnel established — SOCKS :{}, HTTP :{}. Running connectivity tests...",
-                profile.socks_port, profile.http_proxy_port);
-
-            let test_url = profile.test_url.as_deref().unwrap_or("https://www.google.com");
-
-            // Test 1: SOCKS5 proxy
-            let _ = app.emit("tunnel-test-progress", serde_json::json!({ "step": "socks", "status": "testing" }));
-            if let Err(e) = test_socks5_proxy(profile.socks_port, test_url).await {
-                tracing::error!("SOCKS5 test failed: {}", e);
-                let _ = app.emit("tunnel-test-progress", serde_json::json!({ "step": "socks", "status": "fail", "error": e }));
-                cleanup_tunnel(&state).await;
-                *state.status.write().await = TunnelStatus::Error(format!("SOCKS5 test failed: {}", e));
-                let _ = app.emit("tunnel-status", "error").ok();
-                return Err(format!("SOCKS5 proxy test failed: {}", e));
-            }
-            let _ = app.emit("tunnel-test-progress", serde_json::json!({ "step": "socks", "status": "ok" }));
-
-            // Test 2: HTTP proxy
-            let _ = app.emit("tunnel-test-progress", serde_json::json!({ "step": "http", "status": "testing" }));
-            if let Err(e) = test_http_proxy(profile.http_proxy_port, test_url).await {
-                tracing::error!("HTTP proxy test failed: {}", e);
-                let _ = app.emit("tunnel-test-progress", serde_json::json!({ "step": "http", "status": "fail", "error": e }));
-                cleanup_tunnel(&state).await;
-                *state.status.write().await = TunnelStatus::Error(format!("HTTP proxy test failed: {}", e));
-                let _ = app.emit("tunnel-status", "error").ok();
-                return Err(format!("HTTP proxy test failed: {}", e));
-            }
-            let _ = app.emit("tunnel-test-progress", serde_json::json!({ "step": "http", "status": "ok" }));
-
-            // Test 3: Target host reachability
-            let _ = app.emit("tunnel-test-progress", serde_json::json!({ "step": "target", "status": "testing" }));
-            if let Err(e) = test_target_reachable(&profile.target_host, profile.ssh_port).await {
-                tracing::error!("Target reachability test failed: {}", e);
-                let _ = app.emit("tunnel-test-progress", serde_json::json!({ "step": "target", "status": "fail", "error": e }));
-                cleanup_tunnel(&state).await;
-                *state.status.write().await = TunnelStatus::Error(format!("Target test failed: {}", e));
-                let _ = app.emit("tunnel-status", "error").ok();
-                return Err(format!("Target reachability test failed: {}", e));
-            }
-            let _ = app.emit("tunnel-test-progress", serde_json::json!({ "step": "target", "status": "ok" }));
-
-            // All tests passed
-            *state.status.write().await = TunnelStatus::Connected;
-            *state.connected_at.write().await = Some(std::time::Instant::now());
-            let _ = app.emit("tunnel-status", "connected").ok();
-            tracing::info!("All connectivity tests passed — tunnel fully operational");
-
-            if profile.auto_proxy {
-                if let Err(e) = platform::set_system_proxy("127.0.0.1", profile.http_proxy_port).await {
-                    tracing::warn!("Failed to set system proxy: {}", e);
-                }
-            }
-            Ok(())
-        }
+    // Stage 0: SSH + proxy bridge. This can block up to 30s waiting for the
+    // SOCKS port, so it is the most important stage to make interruptible.
+    let tunnel = match cancellable_stage!(
+        crate::tunnel::manager::ManagedTunnel::start(&profile, Arc::clone(&state.stats)),
+        &mut cancel_rx, &app, &state
+    ) {
+        Ok(tunnel) => tunnel,
         Err(e) => {
             tracing::error!("Tunnel start failed: {}", e);
             cleanup_tunnel(&state).await;
             *state.status.write().await = TunnelStatus::Error(e.to_string());
             let _ = app.emit("tunnel-status", "error").ok();
-            Err(e.to_string())
+            return Err(e.to_string());
+        }
+    };
+
+    // The tunnel may have been built right as cancel arrived. Don't publish it
+    // into shared state in that case — stop it here so no port stays occupied.
+    if cancel_requested(&cancel_rx) {
+        let mut tunnel = tunnel;
+        let _ = tunnel.stop().await;
+        return finish_cancelled(&app, &state).await;
+    }
+    *state.tunnel.lock().await = Some(tunnel);
+    tracing::info!("Tunnel established — SOCKS :{}, HTTP :{}. Running connectivity tests...",
+        profile.socks_port, profile.http_proxy_port);
+
+    let test_url = profile.test_url.as_deref().unwrap_or("https://www.google.com");
+
+    // Test 1: SOCKS5 proxy
+    let _ = app.emit("tunnel-test-progress", serde_json::json!({ "step": "socks", "status": "testing" }));
+    let socks_result = cancellable_stage!(
+        test_socks5_proxy(profile.socks_port, test_url), &mut cancel_rx, &app, &state
+    );
+    if let Err(e) = socks_result {
+        tracing::error!("SOCKS5 test failed: {}", e);
+        let _ = app.emit("tunnel-test-progress", serde_json::json!({ "step": "socks", "status": "fail", "error": e }));
+        cleanup_tunnel(&state).await;
+        *state.status.write().await = TunnelStatus::Error(format!("SOCKS5 test failed: {}", e));
+        let _ = app.emit("tunnel-status", "error").ok();
+        return Err(format!("SOCKS5 proxy test failed: {}", e));
+    }
+    let _ = app.emit("tunnel-test-progress", serde_json::json!({ "step": "socks", "status": "ok" }));
+
+    // Test 2: HTTP proxy
+    let _ = app.emit("tunnel-test-progress", serde_json::json!({ "step": "http", "status": "testing" }));
+    let http_result = cancellable_stage!(
+        test_http_proxy(profile.http_proxy_port, test_url), &mut cancel_rx, &app, &state
+    );
+    if let Err(e) = http_result {
+        tracing::error!("HTTP proxy test failed: {}", e);
+        let _ = app.emit("tunnel-test-progress", serde_json::json!({ "step": "http", "status": "fail", "error": e }));
+        cleanup_tunnel(&state).await;
+        *state.status.write().await = TunnelStatus::Error(format!("HTTP proxy test failed: {}", e));
+        let _ = app.emit("tunnel-status", "error").ok();
+        return Err(format!("HTTP proxy test failed: {}", e));
+    }
+    let _ = app.emit("tunnel-test-progress", serde_json::json!({ "step": "http", "status": "ok" }));
+
+    // Test 3: Target host reachability
+    let _ = app.emit("tunnel-test-progress", serde_json::json!({ "step": "target", "status": "testing" }));
+    let target_result = cancellable_stage!(
+        test_target_reachable(&profile.target_host, profile.ssh_port), &mut cancel_rx, &app, &state
+    );
+    if let Err(e) = target_result {
+        tracing::error!("Target reachability test failed: {}", e);
+        let _ = app.emit("tunnel-test-progress", serde_json::json!({ "step": "target", "status": "fail", "error": e }));
+        cleanup_tunnel(&state).await;
+        *state.status.write().await = TunnelStatus::Error(format!("Target test failed: {}", e));
+        let _ = app.emit("tunnel-status", "error").ok();
+        return Err(format!("Target reachability test failed: {}", e));
+    }
+    let _ = app.emit("tunnel-test-progress", serde_json::json!({ "step": "target", "status": "ok" }));
+
+    // A cancel may have landed during the final emit — check before going live.
+    if cancel_requested(&cancel_rx) {
+        return finish_cancelled(&app, &state).await;
+    }
+
+    // All tests passed
+    *state.status.write().await = TunnelStatus::Connected;
+    *state.connected_at.write().await = Some(std::time::Instant::now());
+    let _ = app.emit("tunnel-status", "connected").ok();
+    tracing::info!("All connectivity tests passed — tunnel fully operational");
+
+    if profile.auto_proxy {
+        if let Err(e) = platform::set_system_proxy("127.0.0.1", profile.http_proxy_port).await {
+            tracing::warn!("Failed to set system proxy: {}", e);
         }
     }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn tunnel_cancel(state: State<'_, AppState>) -> Result<(), String> {
+    tracing::info!("Cancel requested for in-flight tunnel operation");
+    // Wake every await point in tunnel_start. That command owns the cleanup
+    // and state reset (finish_cancelled), so its JS promise settles cleanly
+    // and no late "connected" event can overwrite the cancelled UI.
+    state.cancel.cancel();
+    Ok(())
 }
 
 #[tauri::command]

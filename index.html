@@ -3,219 +3,262 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
     <title>PassPort</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
     <link rel="stylesheet" href="/src/styles.css" />
-    <script defer src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
-    <script type="module" src="/src/main.js" defer></script>
+    <script type="module" src="/src/main.js"></script>
   </head>
 
   <body>
 
-    <!-- ═══════ HOME PAGE ═══════ -->
+    <!-- Icon sprite — inlined so the app never waits on a network -->
+    <svg class="sprite" aria-hidden="true" focusable="false">
+      <defs>
+        <symbol id="i-arrow-left" viewBox="0 0 24 24">
+          <path d="M19 12H5" /><path d="M11 18l-6-6 6-6" />
+        </symbol>
+        <symbol id="i-chevron" viewBox="0 0 24 24">
+          <path d="M7 10l5 5 5-5" />
+        </symbol>
+        <symbol id="i-pencil" viewBox="0 0 24 24">
+          <path d="M12 20h9" /><path d="M16.6 3.6a2.1 2.1 0 0 1 3 3L7.2 19 3 20l1-4.2Z" />
+        </symbol>
+        <symbol id="i-trash" viewBox="0 0 24 24">
+          <path d="M3.5 6h17" /><path d="M9 6V4h6v2" /><path d="M18.5 6l-1 14h-11l-1-14" />
+          <path d="M10 10.5v5.5M14 10.5v5.5" />
+        </symbol>
+        <symbol id="i-plus" viewBox="0 0 24 24">
+          <path d="M12 5.5v13M5.5 12h13" />
+        </symbol>
+        <symbol id="i-sliders" viewBox="0 0 24 24">
+          <path d="M4 8h9M17 8h3M4 16h3M11 16h9" />
+          <circle cx="15" cy="8" r="2" /><circle cx="9" cy="16" r="2" />
+        </symbol>
+      </defs>
+    </svg>
+
+    <!-- ══════════════════════ HOME ══════════════════════ -->
     <div class="page active" id="page-home">
       <div class="app">
 
-        <!-- Drag region for overlay titlebar -->
-        <div class="home-drag-bar" data-tauri-drag-region></div>
-
-        <!-- Status Ring — clickable toggle -->
-        <div class="status-orbit">
-          <div class="status-ring" id="statusRing" onclick="window.toggleConnection()">
-            <svg class="ring-svg" viewBox="0 0 150 150">
-              <circle cx="75" cy="75" r="72" fill="none" class="ring-arc" />
-              <circle cx="75" cy="75" r="72" fill="none" class="ring-glow" />
-            </svg>
-            <div class="status-core">
-              <span class="status-label" id="statusText">连接</span>
+        <!-- Title bar: active profile and settings. The window's own chrome
+             (traffic lights) occupies the left corner — no identity lockup,
+             nothing to collide with it. -->
+        <header class="bar" data-tauri-drag-region>
+          <div class="profile-selector" id="profileSelector">
+            <button class="profile-trigger" id="profileTrigger" type="button"
+                    aria-haspopup="listbox" onclick="window.toggleProfileDropdown()">
+              <span class="profile-name" id="profileName">Default</span>
+              <i class="ico profile-selector-arrow-icon"><svg viewBox="0 0 24 24"><use href="#i-chevron" /></svg></i>
+            </button>
+            <div class="profile-dropdown" id="profileDropdown">
+              <div class="profile-dropdown-list" id="profileList" role="listbox" aria-label="Profiles"></div>
+              <button class="profile-dropdown-new" type="button" onclick="window.newProfile()">
+                <i class="ico"><svg viewBox="0 0 24 24"><use href="#i-plus" /></svg></i>
+                <span>New profile</span>
+              </button>
             </div>
           </div>
-        </div>
 
-        <!-- Profile Selector -->
-        <div class="profile-selector" id="profileSelector">
-          <div class="profile-selector-trigger" id="profileTrigger" onclick="window.toggleProfileDropdown()">
-            <span class="profile-selector-name" id="profileName">Default</span>
-            <i data-lucide="chevron-down" class="profile-selector-arrow-icon"></i>
-          </div>
-          <div class="profile-dropdown" id="profileDropdown">
-            <div class="profile-dropdown-list" id="profileList"></div>
-            <div class="profile-dropdown-divider"></div>
-            <button class="profile-dropdown-new" onclick="window.newProfile()">+ New Profile</button>
-          </div>
-        </div>
+          <button class="bar-btn" type="button" title="Edit profile" aria-label="Edit profile"
+                  onclick="window.openSettings()">
+            <i class="ico"><svg viewBox="0 0 24 24"><use href="#i-sliders" /></svg></i>
+          </button>
+        </header>
 
-        <!-- Tunnel Data -->
-        <div class="tunnel-data">
-          <div class="section-header">
-            <div class="section-label" id="tunnelProfileName">Tunnel</div>
-            <button class="logs-link" onclick="window.navigate('logs')">Logs</button>
+        <!-- Status band. Full-bleed, tinted by state, and the whole band is the
+             connect toggle — the primary action is never a separate button. -->
+        <button class="status-ring" id="statusRing" type="button" onclick="window.toggleConnection()">
+          <span class="status-row">
+            <span class="status-pip" aria-hidden="true"></span>
+            <span class="status-label" id="statusText">Disconnected</span>
+            <span class="status-action" aria-hidden="true"></span>
+          </span>
+          <span class="status-sub" id="statusCaption">Tunnel closed</span>
+
+          <!-- Self-test readout, shown only while a connection is being opened.
+               Lives inside the band so it reads as part of the same instrument. -->
+          <span class="test-progress" id="testProgress" aria-hidden="true" style="display: none;">
+            <span class="test-progress-item" id="testSocks"><span class="test-dot"></span>SOCKS</span>
+            <span class="test-progress-item" id="testHttp"><span class="test-dot"></span>HTTP</span>
+            <span class="test-progress-item" id="testTarget"><span class="test-dot"></span>TARGET</span>
+          </span>
+        </button>
+
+        <!-- The readout that matters. Numbers get the only large type on screen. -->
+        <section class="panel panel--traffic">
+          <div class="panel-head">
+            <span class="panel-title">Throughput</span>
+            <span class="panel-meta" id="tunnelUptime"></span>
           </div>
 
-          <!-- Primary: target + ssh + host status -->
-          <div class="tunnel-target-row">
-            <span class="tunnel-target-text" id="targetInfo">—</span>
-            <span class="data-latency" id="hostLatency"></span>
-            <span class="data-dot" id="hostDot"></span>
+          <div class="speed-table">
+            <div class="speed-row">
+              <span class="speed-key"><span class="speed-dir" aria-hidden="true">↓</span>Down</span>
+              <span class="speed-val" id="statsDownSpeed">—</span>
+            </div>
+            <div class="speed-row">
+              <span class="speed-key"><span class="speed-dir" aria-hidden="true">↑</span>Up</span>
+              <span class="speed-val" id="statsUpSpeed">—</span>
+            </div>
           </div>
 
-          <!-- Secondary: local proxy ports -->
-          <div class="tunnel-ports">
-            <div class="tunnel-port-row">
-              <span class="tunnel-port-key">SOCKS</span>
-              <span class="tunnel-port-val">:<span id="socksPortDisplay">1080</span></span>
+          <div class="panel-foot">
+            <span class="kv"><span class="kv-k">Total down</span><span class="kv-v" id="statsTotalDown">0 B</span></span>
+            <span class="kv"><span class="kv-k">Total up</span><span class="kv-v" id="statsTotalUp">0 B</span></span>
+          </div>
+        </section>
+
+        <!-- Route facts, in a bordered spec table. -->
+        <section class="panel panel--route">
+          <div class="panel-head">
+            <span class="panel-title">Route</span>
+            <button class="link-btn" type="button" onclick="window.navigate('logs')">View logs</button>
+          </div>
+
+          <!-- Written by JS, shown in the title bar instead — kept in the DOM so
+               updateTunnelDisplay() keeps working without a duplicate on screen. -->
+          <span class="sr-only" id="tunnelProfileName">Tunnel</span>
+
+          <!-- One spec table. Each row is a fact you can verify at a glance;
+               slack height goes into the rows, never into dead gaps. -->
+          <div class="spec-list">
+            <div class="spec-row">
+              <span class="spec-key">Target</span>
+              <span class="spec-val route-target" id="targetInfo">—</span>
+              <span class="data-latency" id="hostLatency"></span>
+              <span class="data-dot" id="hostDot"></span>
+            </div>
+            <div class="spec-row">
+              <span class="spec-key">SOCKS</span>
+              <span class="spec-val kv-v--mono">:<span id="socksPortDisplay">1080</span></span>
               <span class="data-dot" id="socksDot"></span>
             </div>
-            <div class="tunnel-port-row">
-              <span class="tunnel-port-key">HTTP</span>
-              <span class="tunnel-port-val">:<span id="httpPortDisplay">1081</span></span>
+            <div class="spec-row">
+              <span class="spec-key">HTTP</span>
+              <span class="spec-val kv-v--mono">:<span id="httpPortDisplay">1081</span></span>
               <span class="data-dot" id="httpDot"></span>
             </div>
-          </div>
-
-          <!-- Stats: LAN IP, speed, total traffic -->
-          <div class="tunnel-divider"></div>
-          <div class="tunnel-stats">
-            <div class="tunnel-port-row">
-              <span class="tunnel-port-key">LAN</span>
-              <span class="tunnel-port-val" id="statsIp">—</span>
-            </div>
-            <div class="tunnel-port-row">
-              <span class="tunnel-port-key">↑</span>
-              <span class="tunnel-port-val" id="statsUpSpeed">—</span>
-            </div>
-            <div class="tunnel-port-row">
-              <span class="tunnel-port-key">↓</span>
-              <span class="tunnel-port-val" id="statsDownSpeed">—</span>
-            </div>
-            <div class="tunnel-port-row">
-              <span class="tunnel-port-key">Total</span>
-              <span class="tunnel-port-val">
-                ↑<span id="statsTotalUp">0 B</span> ↓<span id="statsTotalDown">0 B</span>
-              </span>
+            <div class="spec-row">
+              <span class="spec-key">LAN</span>
+              <span class="spec-val kv-v--mono" id="statsIp">—</span>
             </div>
           </div>
 
-          <!-- Footer: Uptime / Error -->
-          <div class="tunnel-divider"></div>
-          <div class="tunnel-footer-row">
-            <span class="tunnel-uptime" id="tunnelUptime"></span>
-            <span class="tunnel-error" id="tunnelError"></span>
-          </div>
-        </div>
-
-        <!-- Test Progress (shown during connection) -->
-        <div class="test-progress" id="testProgress" style="display: none;">
-          <div class="test-progress-item" id="testSocks">
-            <span class="test-dot"></span> SOCKS
-          </div>
-          <div class="test-progress-item" id="testHttp">
-            <span class="test-dot"></span> HTTP
-          </div>
-          <div class="test-progress-item" id="testTarget">
-            <span class="test-dot"></span> Target
-          </div>
-        </div>
+          <div class="error-line" id="tunnelError" role="alert"></div>
+        </section>
 
       </div>
     </div>
 
-    <!-- ═══════ SETTINGS PAGE ═══════ -->
+    <!-- ══════════════════════ SETTINGS ══════════════════════ -->
     <div class="page" id="page-settings">
-      <header class="page-header" data-tauri-drag-region>
-        <button class="back-btn" onclick="window.navigate('home')"><i data-lucide="arrow-left"></i></button>
-        <span class="page-title" id="settingsTitle">Edit Profile</span>
+      <header class="bar bar--page" data-tauri-drag-region>
+        <button class="bar-btn" type="button" aria-label="Back" onclick="window.navigate('home')">
+          <i class="ico"><svg viewBox="0 0 24 24"><use href="#i-arrow-left" /></svg></i>
+        </button>
+        <span class="bar-title" id="settingsTitle">Edit profile</span>
       </header>
+
       <div class="page-body">
-
-        <!-- Tab Bar -->
-        <div class="config-tabs">
-          <button class="config-tab active" data-tab="server" onclick="window.switchTab('server')">Server</button>
-          <button class="config-tab" data-tab="proxy" onclick="window.switchTab('proxy')">Proxy</button>
-          <button class="config-tab" data-tab="options" onclick="window.switchTab('options')">Options</button>
+        <div class="config-tabs" role="tablist" aria-label="Profile settings">
+          <button class="config-tab active" data-tab="server" role="tab" onclick="window.switchTab('server')">Server</button>
+          <button class="config-tab" data-tab="proxy" role="tab" onclick="window.switchTab('proxy')">Proxy</button>
+          <button class="config-tab" data-tab="options" role="tab" onclick="window.switchTab('options')">Options</button>
         </div>
 
-        <!-- Server Tab -->
-        <div class="config-tab-panel active" id="tab-server">
-          <div class="setting-row">
-            <label for="profileNameInput">Profile Name</label>
-            <input type="text" id="profileNameInput" />
+        <!-- Server -->
+        <div class="config-tab-panel active" id="tab-server" role="tabpanel">
+          <div class="field">
+            <label for="profileNameInput">Profile name</label>
+            <input type="text" id="profileNameInput" autocomplete="off" spellcheck="false" />
           </div>
-          <div class="setting-row">
-            <label for="targetHost">Target Host</label>
-            <input type="text" id="targetHost" />
+          <div class="field">
+            <label for="targetHost">Target host</label>
+            <input type="text" id="targetHost" autocomplete="off" spellcheck="false" placeholder="10.0.0.4" />
           </div>
-          <div class="setting-row">
-            <label for="targetUser">Username</label>
-            <input type="text" id="targetUser" />
+          <div class="field-row">
+            <div class="field">
+              <label for="targetUser">Username</label>
+              <input type="text" id="targetUser" autocomplete="off" spellcheck="false" placeholder="root" />
+            </div>
+            <div class="field field--port">
+              <label for="sshPort">Port</label>
+              <input type="text" id="sshPort" inputmode="numeric" />
+            </div>
           </div>
-          <div class="setting-row">
+          <div class="field">
             <label for="password">Password</label>
-            <input type="password" id="password" placeholder="optional" />
-          </div>
-          <div class="setting-row">
-            <label for="sshPort">SSH Port</label>
-            <input type="text" id="sshPort" />
+            <input type="password" id="password" placeholder="Optional" autocomplete="off" />
           </div>
         </div>
 
-        <!-- Proxy Tab -->
-        <div class="config-tab-panel" id="tab-proxy">
-          <div class="setting-row">
-            <label for="socksPort">SOCKS Port</label>
-            <input type="text" id="socksPort" />
+        <!-- Proxy -->
+        <div class="config-tab-panel" id="tab-proxy" role="tabpanel">
+          <div class="field-row">
+            <div class="field">
+              <label for="socksPort">SOCKS port</label>
+              <input type="text" id="socksPort" inputmode="numeric" />
+            </div>
+            <div class="field">
+              <label for="httpPort">HTTP port</label>
+              <input type="text" id="httpPort" inputmode="numeric" />
+            </div>
           </div>
-          <div class="setting-row">
-            <label for="httpPort">HTTP Port</label>
-            <input type="text" id="httpPort" />
-          </div>
-          <div class="setting-row">
-            <label for="autoProxy">Auto Proxy</label>
+          <div class="field field--switch">
+            <div class="field-copy">
+              <label for="autoProxy">Auto proxy</label>
+              <span class="field-hint">Route macOS system traffic through this tunnel</span>
+            </div>
             <input type="checkbox" class="toggle" id="autoProxy" checked />
           </div>
         </div>
 
-        <!-- Options Tab -->
-        <div class="config-tab-panel" id="tab-options">
-          <div class="setting-row">
-            <label for="autoReconnect">Auto Reconnect</label>
+        <!-- Options -->
+        <div class="config-tab-panel" id="tab-options" role="tabpanel">
+          <div class="field field--switch">
+            <div class="field-copy">
+              <label for="autoReconnect">Auto reconnect</label>
+              <span class="field-hint">Re-establish the tunnel when it drops</span>
+            </div>
             <input type="checkbox" class="toggle" id="autoReconnect" checked />
           </div>
-          <div class="setting-row">
+          <div class="field">
             <label for="testUrl">Test URL</label>
-            <input type="text" id="testUrl" placeholder="https://www.google.com" />
+            <input type="text" id="testUrl" autocomplete="off" spellcheck="false" placeholder="https://example.com" />
           </div>
-          <div class="setting-row">
-            <label for="autoStart">Start at Login</label>
+          <div class="field field--switch">
+            <div class="field-copy">
+              <label for="autoStart">Start at login</label>
+              <span class="field-hint">Keep PassPort ready in the menu bar</span>
+            </div>
             <input type="checkbox" class="toggle" id="autoStart" />
           </div>
         </div>
+      </div>
 
-        <!-- Actions -->
-        <div class="settings-actions">
-          <button class="btn-save" onclick="window.saveSettings()">Save</button>
-          <button class="btn-delete" onclick="window.deleteProfile()">Delete</button>
-        </div>
-
+      <div class="page-foot">
+        <button class="btn btn-primary" type="button" onclick="window.saveSettings()">Save</button>
+        <button class="btn btn-danger" type="button" onclick="window.deleteProfile()">Delete</button>
       </div>
     </div>
 
-    <!-- ═══════ LOGS PAGE ═══════ -->
+    <!-- ══════════════════════ LOGS ══════════════════════ -->
     <div class="page" id="page-logs">
-      <header class="page-header" data-tauri-drag-region>
-        <button class="back-btn" onclick="window.navigate('home')"><i data-lucide="arrow-left"></i></button>
-        <span class="page-title">Logs</span>
+      <header class="bar bar--page" data-tauri-drag-region>
+        <button class="bar-btn" type="button" aria-label="Back" onclick="window.navigate('home')">
+          <i class="ico"><svg viewBox="0 0 24 24"><use href="#i-arrow-left" /></svg></i>
+        </button>
+        <span class="bar-title">Logs</span>
+        <button class="bar-btn bar-btn--text" type="button" onclick="window.clearLogs()">Clear</button>
       </header>
-      <div class="page-body">
-        <div class="log-entries" id="logEntries"></div>
-        <button class="btn-clear-logs" onclick="window.clearLogs()">Clear</button>
+
+      <div class="page-body page-body--logs">
+        <div class="log-entries" id="logEntries" role="log" aria-live="polite"></div>
       </div>
     </div>
 
-    <!-- Toast (shared across all pages) -->
-    <div class="toast" id="toast"></div>
+    <div class="toast" id="toast" role="status"></div>
 
   </body>
 </html>
