@@ -18,7 +18,7 @@ src-tauri/gen
 
 # Internal tooling / local notes
 .workbuddy/
-docs/design-system.md
+.docs-backup-*/
 
 # Editor directories and files
 .vscode/*
